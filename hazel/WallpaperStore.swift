@@ -76,7 +76,8 @@ class WallpaperStore: ObservableObject {
         
         var addedAny = false
         for fileURL in files {
-            if fileURL.pathExtension == "mp4" || fileURL.pathExtension == "mov" {
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "mp4" || ext == "mov" {
                 if !wallpapers.contains(where: { $0.url.lastPathComponent == fileURL.lastPathComponent }) {
                     let title = fileURL.deletingPathExtension().lastPathComponent
                     let item = WallpaperItem(url: fileURL, title: title)
@@ -193,7 +194,7 @@ class WallpaperStore: ObservableObject {
 
     private func generateThumbnail(for url: URL, id: UUID) -> String? {
         let cachesDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let thumbnailsDir = cachesDir.appendingPathComponent("LiveWallpaper/Thumbnails", isDirectory: true)
+        let thumbnailsDir = cachesDir.appendingPathComponent("hazel/Thumbnails", isDirectory: true)
         try? fileManager.createDirectory(at: thumbnailsDir, withIntermediateDirectories: true)
 
         let thumbnailPath = thumbnailsDir.appendingPathComponent("\(id.uuidString).png").path
@@ -248,8 +249,6 @@ class WallpaperStore: ObservableObject {
         let asset = AVURLAsset(url: item.url)
         let totalDuration = asset.duration.seconds * 2.0
         
-        let command = "ffmpeg -i \"\(inputFile)\" -progress pipe:1 -filter_complex \"[0:v]reverse[v_rev];[0:v][v_rev]concat=n=2:v=1:a=0[v]\" -map \"[v]\" \"\(outputFile)\" -y"
-        
         DispatchQueue.main.async {
             if let index = self.wallpapers.firstIndex(where: { $0.id == item.id }) {
                 self.wallpapers[index].isProcessing = true
@@ -261,11 +260,22 @@ class WallpaperStore: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
             let pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["zsh", "-c", "export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin; \(command)"]
-            process.standardOutput = pipe
             
+            // SECURITY: Positional arguments (No shell injection possible)
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [
+                "ffmpeg", 
+                "-i", inputFile, 
+                "-progress", "pipe:1", 
+                "-filter_complex", "[0:v]reverse[v_rev];[0:v][v_rev]concat=n=2:v=1:a=0[v]", 
+                "-map", "[v]", 
+                outputFile, 
+                "-y"
+            ]
+            
+            process.standardOutput = pipe
             let handle = pipe.fileHandleForReading
+            
             handle.readabilityHandler = { fileHandle in
                 let data = fileHandle.availableData
                 if let output = String(data: data, encoding: .utf8) {
