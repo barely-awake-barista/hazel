@@ -4,6 +4,7 @@ import AVFoundation
 
 class WallpaperController: ObservableObject {
     @Published private(set) var isActive: Bool = false
+    @Published var isPaused: Bool = false
     
     private var wallpaperWindows: [NSScreen: (window: WallpaperWindow, playerView: VideoPlayerView)] = [:]
     private var store: WallpaperStore
@@ -50,15 +51,9 @@ class WallpaperController: ObservableObject {
     }
 
     private func removeNotifications() {
-        if let observer = screenObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = sleepObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(observer)
-        }
-        if let observer = wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(observer)
-        }
+        if let observer = screenObserver { NotificationCenter.default.removeObserver(observer) }
+        if let observer = sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        if let observer = wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
 
     private func handleScreenChange() {
@@ -92,13 +87,12 @@ class WallpaperController: ObservableObject {
         window.contentView = playerView
         window.orderFront(nil)
         
-        print("Wallpaper window created for screen: \(screen.localizedName), visible: \(window.isVisible)")
-
         wallpaperWindows[screen] = (window, playerView)
     }
 
     func setWallpaper(_ item: WallpaperItem) {
         isActive = true
+        isPaused = false
         store.setActiveWallpaper(item)
 
         for screen in NSScreen.screens {
@@ -109,34 +103,55 @@ class WallpaperController: ObservableObject {
 
         guard let activeItem = store.activeWallpaper,
               let url = store.resolveBookmark(activeItem.url) else {
-            print("Failed to resolve bookmark URL")
             return
         }
 
         for (_, entry) in wallpaperWindows {
-            entry.playerView.loadVideo(url: url, isLooping: activeItem.isLooping, isMuted: activeItem.isMuted)
+            entry.playerView.loadVideo(url: url, isLooping: activeItem.isLooping, isMuted: activeItem.isMuted, isBounce: activeItem.isBounceEnabled)
         }
     }
 
     func clearWallpaper() {
         isActive = false
+        isPaused = false
+        store.activeWallpaperID = nil
 
         for (_, entry) in wallpaperWindows {
             entry.playerView.cleanup()
         }
     }
 
+    func togglePlayback() {
+        if isPaused {
+            resumeAll()
+        } else {
+            pauseAll()
+        }
+    }
+
     func pauseAll() {
+        isPaused = true
         for (_, entry) in wallpaperWindows {
             entry.playerView.pause()
         }
     }
 
-    func resumeIfNeeded() {
+    func resumeAll() {
         guard isActive else { return }
-
+        isPaused = false
         for (_, entry) in wallpaperWindows {
             entry.playerView.play()
+        }
+    }
+
+    func resumeIfNeeded() {
+        guard isActive, !isPaused else { return }
+        resumeAll()
+    }
+    
+    func updateFilters() {
+        for (_, entry) in wallpaperWindows {
+            entry.playerView.updateFilters()
         }
     }
     
@@ -145,7 +160,7 @@ class WallpaperController: ObservableObject {
               let url = store.resolveBookmark(activeItem.url) else { return }
         
         for (_, entry) in wallpaperWindows {
-            entry.playerView.loadVideo(url: url, isLooping: activeItem.isLooping, isMuted: activeItem.isMuted)
+            entry.playerView.loadVideo(url: url, isLooping: activeItem.isLooping, isMuted: activeItem.isMuted, isBounce: activeItem.isBounceEnabled)
         }
     }
 }

@@ -19,7 +19,7 @@ class WallpaperStore: ObservableObject {
     
     private var appSupportURL: URL {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("LiveWallpaper", isDirectory: true)
+        let appFolder = appSupport.appendingPathComponent("hazel", isDirectory: true)
         try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
         return appFolder
     }
@@ -48,11 +48,17 @@ class WallpaperStore: ObservableObject {
     }
 
     func load() {
-        guard fileManager.fileExists(atPath: storageURL.path) else { return }
+        guard fileManager.fileExists(atPath: storageURL.path) else {
+            recoverOrphans()
+            return
+        }
         do {
             let data = try Data(contentsOf: storageURL)
             let decoder = JSONDecoder()
             wallpapers = try decoder.decode([WallpaperItem].self, from: data)
+            
+            // Post-load check for orphans
+            recoverOrphans()
             
             if let idString = UserDefaults.standard.string(forKey: "activeWallpaperID"),
                let id = UUID(uuidString: idString),
@@ -61,6 +67,27 @@ class WallpaperStore: ObservableObject {
             }
         } catch {
             print("Failed to load wallpapers: \(error)")
+            recoverOrphans()
+        }
+    }
+    
+    private func recoverOrphans() {
+        guard let files = try? fileManager.contentsOfDirectory(at: videosURL, includingPropertiesForKeys: nil) else { return }
+        
+        var addedAny = false
+        for fileURL in files {
+            if fileURL.pathExtension == "mp4" || fileURL.pathExtension == "mov" {
+                if !wallpapers.contains(where: { $0.url.lastPathComponent == fileURL.lastPathComponent }) {
+                    let title = fileURL.deletingPathExtension().lastPathComponent
+                    let item = WallpaperItem(url: fileURL, title: title)
+                    wallpapers.append(item)
+                    addedAny = true
+                }
+            }
+        }
+        
+        if addedAny {
+            save()
         }
     }
 
@@ -149,6 +176,13 @@ class WallpaperStore: ObservableObject {
         }
     }
 
+    func toggleBounce(for item: WallpaperItem) {
+        if let index = wallpapers.firstIndex(where: { $0.id == item.id }) {
+            wallpapers[index].isBounceEnabled.toggle()
+            save()
+        }
+    }
+
     func resolveBookmark(_ bookmarkURL: URL) -> URL? {
         guard fileManager.fileExists(atPath: bookmarkURL.path) else {
             print("File does not exist at path: \(bookmarkURL.path)")
@@ -204,5 +238,88 @@ class WallpaperStore: ObservableObject {
         guard let thumbnailPath = item.thumbnailPath else { return nil }
         let url = URL(fileURLWithPath: thumbnailPath)
         return NSImage(contentsOf: url)
+    }
+
+    func mirrorWallpaper(_ item: WallpaperItem) {
+        let inputFile = item.url.path
+        let outputURL = videosURL.appendingPathComponent("\(UUID().uuidString)_mirrored.mp4")
+        let outputFile = outputURL.path
+        
+        let asset = AVURLAsset(url: item.url)
+        let totalDuration = asset.duration.seconds * 2.0
+        
+        let command = "ffmpeg -i \"\(inputFile)\" -progress pipe:1 -filter_complex \"[0:v]reverse[v_rev];[0:v][v_rev]concat=n=2:v=1:a=0[v]\" -map \"[v]\" \"\(outputFile)\" -y"
+        
+        DispatchQueue.main.async {
+            if let index = self.wallpapers.firstIndex(where: { $0.id == item.id }) {
+                self.wallpapers[index].isProcessing = true
+                self.wallpapers[index].processingProgress = 0.0
+                self.save()
+            }
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["zsh", "-c", "export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin; \(command)"]
+            process.standardOutput = pipe
+            
+            let handle = pipe.fileHandleForReading
+            handle.readabilityHandler = { fileHandle in
+                let data = fileHandle.availableData
+                if let output = String(data: data, encoding: .utf8) {
+                    for line in output.components(separatedBy: "\n") {
+                        if line.contains("out_time_ms=") {
+                            let parts = line.components(separatedBy: "=")
+                            if parts.count == 2, let ms = Double(parts[1]) {
+                                let seconds = ms / 1_000_000.0
+                                let progress = min(1.0, seconds / totalDuration)
+                                DispatchQueue.main.async { [weak self] in
+                                    guard let self = self else { return }
+                                    if let idx = self.wallpapers.firstIndex(where: { $0.id == item.id }) {
+                                        self.wallpapers[idx].processingProgress = progress
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            do {
+                try process.run()
+                process.waitUntilExit()
+                handle.readabilityHandler = nil
+                
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if let index = self.wallpapers.firstIndex(where: { $0.id == item.id }) {
+                        if process.terminationStatus == 0 {
+                            NSWorkspace.shared.recycle([item.url]) { _, _ in }
+                            var updated = self.wallpapers[index]
+                            updated.url = outputURL
+                            updated.isBounceEnabled = false
+                            updated.isMirrored = true
+                            updated.isProcessing = false
+                            updated.processingProgress = 1.0
+                            self.wallpapers[index] = updated
+                        } else {
+                            self.wallpapers[index].isProcessing = false
+                        }
+                        self.save()
+                    }
+                }
+            } catch {
+                handle.readabilityHandler = nil
+                print("FFmpeg mirroring failed: \(error)")
+                DispatchQueue.main.async { [weak self] in
+                    if let index = self?.wallpapers.firstIndex(where: { $0.id == item.id }) {
+                        self?.wallpapers[index].isProcessing = false
+                        self?.save()
+                    }
+                }
+            }
+        }
     }
 }

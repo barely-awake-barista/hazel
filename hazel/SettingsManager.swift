@@ -36,13 +36,31 @@ class SettingsManager {
     }
     
     var openOnStartup: Bool {
-        get {
-            UserDefaults.standard.bool(forKey: "openOnStartup")
-        }
+        get { UserDefaults.standard.bool(forKey: "openOnStartup") }
         set {
             UserDefaults.standard.set(newValue, forKey: "openOnStartup")
             updateLoginItem(enabled: newValue)
         }
+    }
+    
+    var brightness: Double {
+        get { UserDefaults.standard.object(forKey: "brightness") as? Double ?? 0.0 }
+        set { UserDefaults.standard.set(newValue, forKey: "brightness") }
+    }
+    
+    var saturation: Double {
+        get { UserDefaults.standard.object(forKey: "saturation") as? Double ?? 1.0 }
+        set { UserDefaults.standard.set(newValue, forKey: "saturation") }
+    }
+    
+    var hue: Double {
+        get { UserDefaults.standard.object(forKey: "hue") as? Double ?? 0.0 }
+        set { UserDefaults.standard.set(newValue, forKey: "hue") }
+    }
+    
+    var blur: Double {
+        get { UserDefaults.standard.object(forKey: "blur") as? Double ?? 0.0 }
+        set { UserDefaults.standard.set(newValue, forKey: "blur") }
     }
     
     private init() {

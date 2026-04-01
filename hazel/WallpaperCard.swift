@@ -1,84 +1,162 @@
 import SwiftUI
 import AppKit
 
-struct WallpaperCard: View {
+struct WallpaperRow: View {
     let item: WallpaperItem
     let isSelected: Bool
     let onTap: () -> Void
     let onRemove: () -> Void
     let onToggleLoop: () -> Void
     let onToggleMute: () -> Void
+    let onToggleBounce: () -> Void
+    let onMirror: () -> Void
+    let onShowInFinder: () -> Void
 
     @State private var thumbnailImage: NSImage?
-
-    private let cardWidth: CGFloat = 160
-    private let cardHeight: CGFloat = 140
-    private let thumbnailWidth: CGFloat = 140
-    private let thumbnailHeight: CGFloat = 79
+    @State private var isHovered = false
 
     var body: some View {
-        VStack(spacing: 8) {
+        HStack(spacing: 12) {
             ZStack {
                 if let image = thumbnailImage {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: thumbnailWidth, height: thumbnailHeight)
-                        .clipped()
+                        .frame(width: 48, height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: thumbnailWidth, height: thumbnailHeight)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(.primary.opacity(0.05))
+                        .frame(width: 48, height: 28)
                         .overlay(
                             Image(systemName: "video.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(.gray)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Design.iconGradientDim)
                         )
                 }
-
+                
                 if isSelected {
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.accentColor, lineWidth: 3)
-                        .frame(width: thumbnailWidth, height: thumbnailHeight)
-                    
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(.accentColor)
-                        .background(Circle().fill(Color.black.opacity(0.5)))
+                        .stroke(Color.accentColor, lineWidth: 1.5)
+                        .frame(width: 48, height: 28)
+                }
+                
+                if item.isProcessing {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                        VStack(spacing: 4) {
+                            ProgressView(value: item.processingProgress, total: 1.0)
+                                .progressViewStyle(.linear)
+                                .tint(Color.accentColor)
+                                .scaleEffect(x: 0.8, y: 0.5)
+                        }
+                    }
+                    .frame(width: 48, height: 28).clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
-            .frame(width: thumbnailWidth, height: thumbnailHeight)
-            .cornerRadius(4)
             .onTapGesture(perform: onTap)
+            .contextMenu {
+                Button("Show in Finder") { onShowInFinder() }
+                Divider()
+                Button("Bake Bounce (Mirror Video)") { onMirror() }
+                Divider()
+                Button("Remove", role: .destructive) { onRemove() }
+            }
 
-            Text(item.title)
-                .font(Font.custom("GeistPixel-Square", size: 11))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(width: cardWidth - 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(Design.geist(13))
+                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                    .lineLimit(1)
+                
+                HStack(spacing: 6) {
+                    if item.isLooping {
+                        Image(systemName: "arrow.2.squarepath")
+                            .font(.system(size: 9))
+                            .help("Continuous Loop")
+                    }
+                    if item.isBounceEnabled {
+                        Image(systemName: "infinity")
+                            .font(.system(size: 9))
+                            .help("Ping-Pong (Software Bounce)")
+                    }
+                    if item.isMirrored {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.accentColor)
+                            .help("Baked Bounce (Mirrored File)")
+                    }
+                    if item.isMuted {
+                        Image(systemName: "speaker.slash.fill")
+                            .font(.system(size: 9))
+                            .help("Muted")
+                    }
+                }
+                .foregroundStyle(.tertiary)
+            }
+            
+            Spacer()
+            
+            if isHovered {
+                HStack(spacing: 10) {
+                    Button(action: onToggleMute) {
+                        Image(systemName: item.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(item.isMuted ? "Unmute" : "Mute")
+                    
+                    Button(action: onToggleBounce) {
+                        Image(systemName: "infinity")
+                            .font(.system(size: 11))
+                            .foregroundStyle(item.isBounceEnabled ? Color.accentColor : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Ping-Pong (Bounce) Loop")
+                    
+                    Button(action: onToggleLoop) {
+                        Image(systemName: "arrow.2.squarepath")
+                            .font(.system(size: 11))
+                            .foregroundStyle(item.isLooping ? Color.accentColor : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Continuous Loop")
+                    
+                    Button(action: onRemove) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove from Library")
+                }
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.accentColor)
+                    .help("Currently Active")
+            }
         }
-        .frame(width: cardWidth, height: cardHeight)
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.gray.opacity(0.1))
-        )
-        .contextMenu {
-            Button(item.isLooping ? "Disable Loop" : "Enable Loop", action: onToggleLoop)
-            Button(item.isMuted ? "Unmute" : "Mute", action: onToggleMute)
-            Divider()
-            Button("Remove", role: .destructive, action: onRemove)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .onHover { hovering in
+            withAnimation(.spring(duration: 0.2)) {
+                isHovered = hovering
+            }
         }
         .onAppear(perform: loadThumbnail)
     }
 
     private func loadThumbnail() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let fileManager = FileManager.default
-            if let thumbnailPath = item.thumbnailPath,
-               fileManager.fileExists(atPath: thumbnailPath),
-               let image = NSImage(contentsOfFile: thumbnailPath) {
-                DispatchQueue.main.async {
+        Task {
+            guard let thumbnailPath = item.thumbnailPath else { return }
+            let url = URL(fileURLWithPath: thumbnailPath)
+            if let image = NSImage(contentsOf: url) {
+                await MainActor.run {
                     self.thumbnailImage = image
                 }
             }
@@ -86,45 +164,3 @@ struct WallpaperCard: View {
     }
 }
 
-struct AddCard: View {
-    let onTap: () -> Void
-
-    private let cardWidth: CGFloat = 160
-    private let cardHeight: CGFloat = 140
-    private let thumbnailWidth: CGFloat = 140
-    private let thumbnailHeight: CGFloat = 79
-    
-    @State private var isHovered = false
-
-    var body: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(isHovered ? 0.3 : 0.2))
-                    .frame(width: thumbnailWidth, height: thumbnailHeight)
-                    .scaleEffect(isHovered ? 1.05 : 1.0)
-
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundColor(.accentColor)
-            }
-            .frame(width: thumbnailWidth, height: thumbnailHeight)
-            .onTapGesture(perform: onTap)
-
-            Text("Add Wallpaper")
-                .font(Font.custom("GeistPixel-Square", size: 11))
-                .foregroundColor(.secondary)
-        }
-        .frame(width: cardWidth, height: cardHeight)
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(isHovered ? 0.2 : 0.1))
-        )
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
-    }
-}
