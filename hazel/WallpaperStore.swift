@@ -49,7 +49,9 @@ class WallpaperStore: ObservableObject {
 
     func load() {
         guard fileManager.fileExists(atPath: storageURL.path) else {
-            recoverOrphans()
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                self?.recoverOrphans()
+            }
             return
         }
         do {
@@ -57,8 +59,10 @@ class WallpaperStore: ObservableObject {
             let decoder = JSONDecoder()
             wallpapers = try decoder.decode([WallpaperItem].self, from: data)
             
-            // Post-load check for orphans
-            recoverOrphans()
+            // Background check for orphans to keep launch lightning-fast
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                self?.recoverOrphans()
+            }
             
             if let idString = UserDefaults.standard.string(forKey: "activeWallpaperID"),
                let id = UUID(uuidString: idString),
@@ -67,28 +71,33 @@ class WallpaperStore: ObservableObject {
             }
         } catch {
             print("Failed to load wallpapers: \(error)")
-            recoverOrphans()
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                self?.recoverOrphans()
+            }
         }
     }
     
     private func recoverOrphans() {
         guard let files = try? fileManager.contentsOfDirectory(at: videosURL, includingPropertiesForKeys: nil) else { return }
         
-        var addedAny = false
+        var recoveredItems: [WallpaperItem] = []
         for fileURL in files {
             let ext = fileURL.pathExtension.lowercased()
             if ext == "mp4" || ext == "mov" {
                 if !wallpapers.contains(where: { $0.url.lastPathComponent == fileURL.lastPathComponent }) {
                     let title = fileURL.deletingPathExtension().lastPathComponent
                     let item = WallpaperItem(url: fileURL, title: title)
-                    wallpapers.append(item)
-                    addedAny = true
+                    recoveredItems.append(item)
                 }
             }
         }
         
-        if addedAny {
-            save()
+        if !recoveredItems.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.wallpapers.append(contentsOf: recoveredItems)
+                self.save()
+            }
         }
     }
 
@@ -241,7 +250,21 @@ class WallpaperStore: ObservableObject {
         return NSImage(contentsOf: url)
     }
 
+    private func isFFmpegAvailable() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["zsh", "-c", "export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin; which ffmpeg"]
+        try? process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
     func mirrorWallpaper(_ item: WallpaperItem) {
+        guard isFFmpegAvailable() else {
+            print("❌ FFmpeg not found. Please install via: brew install ffmpeg")
+            return
+        }
+        
         let inputFile = item.url.path
         let outputURL = videosURL.appendingPathComponent("\(UUID().uuidString)_mirrored.mp4")
         let outputFile = outputURL.path

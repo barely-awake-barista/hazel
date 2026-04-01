@@ -71,6 +71,19 @@ class WallpaperController: ObservableObject {
         let screensToAdd = currentScreens.subtracting(existingScreens)
         for screen in screensToAdd {
             createWallpaperWindow(for: screen)
+            
+            // Auto-load current wallpaper on the new screen
+            if let activeItem = store.activeWallpaper,
+               isActive,
+               let url = store.resolveBookmark(activeItem.url),
+               let entry = wallpaperWindows[screen] {
+                entry.playerView.loadVideo(
+                    url: url, 
+                    isLooping: activeItem.isLooping, 
+                    isMuted: activeItem.isMuted, 
+                    isBounce: activeItem.isBounceEnabled
+                )
+            }
         }
 
         for (screen, entry) in wallpaperWindows {
